@@ -47,4 +47,5 @@ To Setup this project, follow the steps below:
 
 <h3>Automation</h3>
 To Automate this project, follow the steps below:  
+
 - coming soon
