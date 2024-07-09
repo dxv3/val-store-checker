@@ -4,107 +4,107 @@ import requests
 import riot_auth
 import os
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
-UNAME = ""
-PASSWD = ""
-WEBHOOK_URL = ""
-REGION = ""
+UNAME = os.getenv("USERNAME")
+PASSWD = os.getenv("PASSWORD")
+WEHBOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+REGION = os.getenv("REGIONN")
+
+WATCHLIST = ["Xenohunter Knife"]
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 CREDS = UNAME, PASSWD
 
-try:
-    version_response = requests.get('https://valorant-api.com/v1/version')
-    version_response.raise_for_status()
-    version_data = version_response.json()['data']
-    riot_auth.RiotAuth.RIOT_CLIENT_USER_AGENT = f"RiotClient/{version_data['riotClientBuild']} %s (Windows;10;;Professional, x64)"
-    print(f'Using User Agent "{riot_auth.RiotAuth.RIOT_CLIENT_USER_AGENT}"')
-except requests.RequestException as e:
-    print(f"Failed to get Riot client version: {e}")
-    sys.exit(1)
-
+riot_auth.RiotAuth.RIOT_CLIENT_USER_AGENT = f"RiotClient/{requests.get('https://valorant-api.com/v1/version').json()['data']['riotClientBuild']} %s (Windows;10;;Professional, x64)"
+print(f'Using User Agent "{riot_auth.RiotAuth.RIOT_CLIENT_USER_AGENT}"')
 print("Getting Tokens....")
 auth = riot_auth.RiotAuth()
-
-try:
-    asyncio.run(auth.authorize(*CREDS))
-    if not all([auth.token_type, auth.access_token, auth.entitlements_token, auth.user_id]):
-        print("Failed to authorize. Please check your credentials and try again.")
-        sys.exit(1)
-except Exception as e:
-    print(f"Failed to authorize: {e}")
-    sys.exit(1)
+asyncio.run(auth.authorize(*CREDS))
 
 print(f"Access Token Type: {auth.token_type}\n")
 print(f"Access Token: {auth.access_token}\n")
 print(f"Entitlements Token: {auth.entitlements_token}\n")
 print(f"User ID: {auth.user_id}")
 
-try:
-    reauth_success = asyncio.run(auth.reauthorize())
-    if not reauth_success:
-        print("Reauthorization failed.")
-        sys.exit(1)
-except Exception as e:
-    print(f"Failed to reauthorize: {e}")
-    sys.exit(1)
+asyncio.run(auth.reauthorize())
 
 headers = {
     'Authorization': f'{auth.token_type} {auth.access_token}',
     'X-Riot-ClientPlatform': 'ew0KCSJwbGF0Zm9ybVR5cGUiOiAiUEMiLA0KCSJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLA0KCSJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwNCgkicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iDQp9',
-    'X-Riot-ClientVersion': f'{version_data["riotClientVersion"]}',
+    'X-Riot-ClientVersion': f'{requests.get("https://valorant-api.com/v1/version").json()["data"]["riotClientVersion"]}',
     'X-Riot-Entitlements-JWT': f'{auth.entitlements_token}',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.182 Safari/537.36',
 }
 
-try:
-    response = requests.get(f"https://pd.{REGION}.a.pvp.net/store/v2/storefront/{auth.user_id}", headers=headers)
-    response.raise_for_status()
-    response_data = response.json()
-    if 'SkinsPanelLayout' not in response_data:
-        print("Unexpected response structure. 'SkinsPanelLayout' key not found.")
-        print(response_data)
-        sys.exit(1)
-except requests.RequestException as e:
-    print(f"Failed to get store data: {e}")
+response = requests.get(f"https://pd.{REGION}.a.pvp.net/store/v2/storefront/{auth.user_id}", headers=headers)
+
+if response.status_code != 200:
+    print(f"Error: Received status code {response.status_code} from store API")
     sys.exit(1)
 
-shop_items = [0, 1, 2, 3]
+try:
+    store_data = response.json()
+except requests.exceptions.JSONDecodeError:
+    print("Error: Failed to decode JSON response")
+    sys.exit(1)
 
-for i in shop_items:
+if 'SkinsPanelLayout' not in store_data:
+    print("Error: SkinsPanelLayout not found in response")
+    sys.exit(1)
+
+shop_items = store_data["SkinsPanelLayout"]["SingleItemOffers"]
+
+for i in range(len(shop_items)):
+    item_id = shop_items[i]
+    itemdata_response = requests.get(f"https://valorant-api.com/v1/weapons/skinlevels/{item_id}")
+
+    if itemdata_response.status_code != 200:
+        print(f"Error retrieving data for item {item_id}: {itemdata_response.status_code}")
+        continue
+
     try:
-        offer_id = response_data['SkinsPanelLayout']['SingleItemOffers'][i]
-        item_response = requests.get(f"https://valorant-api.com/v1/weapons/skinlevels/{offer_id}")
-        item_response.raise_for_status()
-        item_data = item_response.json()["data"]
-        print(f'Got data for {item_data["displayName"]}')
+        itemdata = itemdata_response.json()
+    except requests.exceptions.JSONDecodeError:
+        print(f"Error decoding JSON for item {item_id}")
+        continue
 
-        webhook_data = {
-            "embeds": [
-                {
-                    "title": f'{item_data["displayName"]} - {response_data["SkinsPanelLayout"]["SingleItemStoreOffers"][i]["Cost"]["85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741"]}VP',
-                    "color": 13346551,
-                    "image": {
-                        "url": f'{item_data["displayIcon"]}'
-                    }
+    if 'data' not in itemdata:
+        print(f"Error: 'data' field not found in itemdata for item {item_id}")
+        continue
+
+    skin_name = itemdata["data"]["displayName"]
+    skin_cost = store_data["SkinsPanelLayout"]["SingleItemStoreOffers"][i]["Cost"]["85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741"]
+
+    print(f'Got data for {skin_name}')
+
+    webhook_data = {
+        "embeds": [
+            {
+                "title": f'{skin_name} - {skin_cost} VP',
+                "color": 13346551,
+                "image": {
+                    "url": f'{itemdata["data"]["displayIcon"]}'
                 }
-            ],
-            "attachments": []
+            }
+        ],
+        "attachments": []
         }
 
-        if WEBHOOK_URL:
-            webhook_response = requests.post(WEBHOOK_URL, json=webhook_data)
-            if webhook_response.status_code == 204:
-                print('Webhook sent successfully.')
-            else:
-                print(f"Failed to send webhook. Status code: {webhook_response.status_code}")
-                print(f"Response: {webhook_response.text}")
-        else:
-            print('Webhook URL is not set.')
+    webhook_response = requests.post(WEBHOOK_URL, json=webhook_data)
+    if skin_name in WATCHLIST:
+        WEGOTTHESKIN = {"content": f"@everyone {skin_name} in the store!!! {skin_cost} VP!",}
+        time.sleep(1)
+        webhook_response = requests.post(WEBHOOK_URL, json=WEGOTTHESKIN)
+        time.sleep(0.3)
+        webhook_response = requests.post(WEBHOOK_URL, json=WEGOTTHESKIN)
+        time.sleep(0.3)
+        webhook_response = requests.post(WEBHOOK_URL, json=WEGOTTHESKIN)
+        time.sleep(0.3)
+        webhook_response = requests.post(WEBHOOK_URL, json=WEGOTTHESKIN)
+    print(f"Webhook response status: {webhook_response.status_code}")
+    print(webhook_response.text)
 
-    except requests.RequestException as e:
-        print(f"Failed to get item data or send webhook: {e}")
-    except KeyError as e:
-        print(f"Key error: {e}")
+print("Script completed.")
