@@ -46,5 +46,5 @@ To Setup this project, follow the steps below:
 4) Run <a href="https://github.com/dxv3/valorant-store-checker/blob/main/main.py">`main.py`</a> to check the items in your store and send them to your webhook
 
 <h3>Automation</h3>
-To Automate this project, follow the steps below:
+To Automate this project, follow the steps below:  
 - coming soon
